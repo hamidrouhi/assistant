@@ -57,7 +57,6 @@ jobs:
               echo "✅ Successfully extracted. Creating ZIP archive..."
               # 2. تبدیل محتویات استخراج شده به یک فایل ZIP در پوشه downloads
               ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
-              # استفاده از -r برای شامل کردن زیرپوشه‌ها و -o برای بازنویسی اجباری
               zip -r -o "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
               echo "✅ Conversion complete: $ZIP_ARCHIVE created."
 
@@ -69,7 +68,7 @@ jobs:
           done
 
 
-      # --- بخش 2: پردازش دانلودهای URL (همان منطق قبلی) ---
+      # --- بخش 2: پردازش دانلودهای URL (فقط RAR تبدیل می‌شود، ZIP کپی می‌شود) ---
       - name: Download and Process URLs
         if: github.event_name == 'workflow_dispatch' # این بخش فقط زمانی اجرا می‌شود که دستی فراخوانی شود
         run: |
@@ -91,13 +90,14 @@ jobs:
               "$URL"
           done
 
-          # 2. پردازش فایل‌های دانلود شده (فقط RAR تبدیل می‌شود، ZIP کپی می‌شود)
+          # 2. پردازش فایل‌های دانلود شده (منطق جدید)
           echo "⚙️ Starting file processing from downloads..."
           for FILE in tmp_downloads/*; do
             [ -f "$FILE" ] || continue
             BASENAME=$(basename "$FILE")
 
             if [[ "$BASENAME" == *.rar ]]; then
+              # --- منطق RAR: استخراج و تبدیل به ZIP ---
               echo "📦 Found RAR file: $BASENAME. Extracting and converting to ZIP..."
               TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
               mkdir -p "$TEMP_OUTPUT_DIR"
@@ -110,7 +110,7 @@ jobs:
               fi
 
             elif [[ "$BASENAME" == *.zip ]]; then
-               # اگر فایل از قبل ZIP بود، فقط آن را کپی می‌کنیم (استخراج نمی‌کنیم)
+               # --- منطق ZIP: فقط کپی مستقیم (بدون استخراج) ---
                echo "➡️ Found existing ZIP file: $BASENAME. Copying directly to downloads/."
                cp "$FILE" "downloads/$BASENAME"
 
