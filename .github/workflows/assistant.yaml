@@ -108,12 +108,13 @@ jobs:
 
               if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
                 echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts (zip-split)"
-                # تقسیم فایل به بخش‌های کوچک‌تر با پسوند .partX.zip
-                split -b "${SPLIT_THRESHOLD_MB}m" "$FILE" "downloads/chunk_"
+                # Create a zip split into parts that can be reassembled with `zip -F`
+                zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${BASENAME}.zip" -j "$FILE"
+                echo "✅ Parts: $(ls downloads/${BASENAME}.z* 2>/dev/null | wc -l)"
               else
-                echo "✅ $BASENAME is within size limit or threshold is 0. Keeping as single file."
+                cp "$FILE" "downloads/$BASENAME"
               fi
-          done
+            done
 
 
       - name: Commit & Push in batches of 5 files
