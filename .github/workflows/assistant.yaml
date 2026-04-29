@@ -32,8 +32,9 @@ jobs:
       - name: Install aria2, zip, and unrar
         run: |
           sudo apt-get update
-          # نصب ابزارهای مورد نیاز شامل unrar برای استخراج RAR
+          # نصب ابزارهای مورد نیاز شامل aria2، zip و unrar برای استخراج RAR
           sudo apt-get install -y aria2 zip unzip unrar
+
       - name: Downloader Execution
         run: |
           MODE="${{ github.event.inputs.mode }}"
@@ -51,17 +52,16 @@ jobs:
             aria2c \
               --split=2 \
               --max-connection-per-server=2 \
-              --min-split-size=90M \
               --dir="tmp_downloads" \
               --out="$FILENAME" \
               "$URL"
           done
 
-          # --- مرحله ۲: پردازش فایل‌ها (استخراج RAR و سپس Chunking) ---
+          # --- مرحله ۲: پردازش فایل‌ها (استخراج RAR و تبدیل به ZIP) ---
           if [ "$MODE" = "zip" ]; then
             ARCHIVE_NAME="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
             echo "📦 Creating zip archive: $ARCHIVE_NAME"
-            # در حالت ZIP، همه چیز را به یک آرشیو می‌ریزیم (تقسیم‌بندی روی این آرشیو نهایی اعمال می‌شود)
+            # در حالت ZIP، همه چیز را به یک آرشیو می‌ریزیم (این آرشیو نهایی برای Chunking آماده است)
             zip -j "$ARCHIVE_NAME" tmp_downloads/*
             rm -rf tmp_downloads
           else
@@ -71,47 +71,49 @@ jobs:
               BASENAME=$(basename "$FILE")
 
               if [[ "$BASENAME" == *.rar ]]; then
-                # --- قابلیت جدید: استخراج RAR ---
-                echo "📦 Found RAR file: $BASENAME. Extracting..."
+                # --- منطق RAR: استخراج و تبدیل به ZIP ---
+                echo "📦 Found RAR file: $BASENAME. Extracting and converting to ZIP..."
                 TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
                 mkdir -p "$TEMP_OUTPUT_DIR"
                 unrar x "$FILE" "$TEMP_OUTPUT_DIR/"
 
-                # پردازش محتویات استخراج شده (که حالا در TEMP_OUTPUT_DIR هستند)
-                for EXTRACTED_FILE in "$TEMP_OUTPUT_DIR"/*; do
-                    [ -f "$EXTRACTED_FILE" ] || continue
-                    SIZE=$(stat -c%s "$EXTRACTED_FILE")
-                    EXT_BASENAME=$(basename "$EXTRACTED_FILE")
-
-                    if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
-                        echo "✂️ $EXT_BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts (zip-split)"
-                        # تقسیم فایل استخراج شده به بخش‌های کوچک‌تر
-                        zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${EXT_BASENAME}.zip" -j "$EXTRACTED_FILE"
-                    else
-                        cp "$EXTRACTED_FILE" "downloads/$EXT_BASENAME" # کپی مستقیم اگر کوچک باشد
-                    fi
-                done
-                rm -rf "$TEMP_OUTPUT_DIR"
+                if [ -d "$TEMP_OUTPUT_DIR" ] && [ "$(ls -A $TEMP_OUTPUT_DIR)" ]; then
+                  # تبدیل محتویات استخراج شده به ZIP
+                  ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
+                  zip -r -o "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
+                  echo "✅ Conversion complete: $ZIP_ARCHIVE created."
+                fi
 
               elif [[ "$BASENAME" == *.zip ]]; then
-                 # --- قابلیت جدید: ZIP دانلود شده فقط کپی می‌شود (بدون استخراج) ---
+                 # --- منطق ZIP دانلود شده: فقط کپی مستقیم (بدون استخراج) ---
                  echo "➡️ Found existing ZIP file: $BASENAME. Copying directly to downloads/."
                  cp "$FILE" "downloads/$BASENAME"
 
               else
-                # حالت عادی: فایل معمولی
-                SIZE=$(stat -c%s "$FILE")
-                if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
-                  echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts (zip-split)"
-                  # تقسیم فایل دانلود شده به بخش‌های کوچک‌تر
-                  zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${BASENAME}.zip" -j "$FILE"
-                else
-                  cp "$FILE" "downloads/$BASENAME" # کپی مستقیم اگر کوچک باشد
-                fi
+                # حالت عادی: فایل معمولی، فقط کپی می‌شود
+                echo "➡️ Copying standard file: $BASENAME to downloads/"
+                cp "$FILE" "downloads/$BASENAME"
               fi
             done
             rm -rf tmp_downloads
           fi
+          
+          # --- مرحله ۳: اعمال Chunking بر روی همه فایل‌های نهایی در پوشه downloads/ ---
+          echo "✂️ Applying chunking to all final files in 'downloads/'..."
+          for FILE in downloads/*; do
+              [ -f "$FILE" ] || continue
+              SIZE=$(stat -c%s "$FILE")
+              BASENAME=$(basename "$FILE")
+
+              if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
+                echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts (zip-split)"
+                # تقسیم فایل به بخش‌های کوچک‌تر با پسوند .partX.zip
+                split -b "${SPLIT_THRESHOLD_MB}m" "$FILE" "downloads/chunk_"
+              else
+                echo "✅ $BASENAME is within size limit or threshold is 0. Keeping as single file."
+              fi
+          done
+
 
       - name: Commit & Push in batches of 5 files
         run: |
