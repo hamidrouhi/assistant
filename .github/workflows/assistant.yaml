@@ -1,5 +1,8 @@
-name: URL Downloader and Processor
+name: File Processor (RAR to ZIP Converter)
 on:
+  push:
+    branches:
+      - main # یا هر شاخه‌ای که می‌خواهید روی آن اجرا شود
   workflow_dispatch:
     inputs:
       urls:
@@ -19,25 +22,59 @@ on:
         required: false
         default: 90
         type: number
+
 jobs:
-  save-file:
+  process-files:
     runs-on: ubuntu-latest
+    env:
+      # *** این خط برای رفع اخطار Node.js است ***
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
     permissions:
       contents: write
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install dependencies (aria2, zip, unrar)
+
+      # --- بخش 1: پردازش فایل‌های آپلود شده (RAR -> ZIP) ---
+      - name: Process Uploaded RAR Files
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[Uploaded]') # شرطی برای اجرای منطق تبدیل فقط در صورت Push و وجود تگ خاص
         run: |
-          sudo apt-get update
-          # نصب ابزارهای مورد نیاز شامل aria2، zip و unrar برای استخراج RAR
-          sudo apt-get install -y aria2 zip unzip unrar
-      - name: Downloader Execution
+          echo "🔍 Checking for uploaded RAR files in the extractor directory..."
+          EXTRACTOR_DIR="extractor"
+          mkdir -p downloads
+
+          # پیدا کردن تمام فایل‌های .rar در پوشه extractor
+          find "$EXTRACTOR_DIR" -type f -name "*.rar" | while read RAR_FILE; do
+            BASENAME=$(basename "$RAR_FILE")
+            echo "📦 Found RAR file: $BASENAME. Extracting and converting to ZIP..."
+
+            # 1. استخراج فایل RAR به یک پوشه موقت
+            TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
+            mkdir -p "$TEMP_OUTPUT_DIR"
+            unrar x "$RAR_FILE" "$TEMP_OUTPUT_DIR/"
+            
+            if [ -d "$TEMP_OUTPUT_DIR" ] && [ "$(ls -A $TEMP_OUTPUT_DIR)" ]; then
+              echo "✅ Successfully extracted. Creating ZIP archive..."
+              # 2. تبدیل محتویات استخراج شده به یک فایل ZIP در پوشه downloads
+              ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
+              zip -r "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
+              echo "✅ Conversion complete: $ZIP_ARCHIVE created."
+
+              # 3. پاکسازی و انتقال فایل اصلی RAR (اختیاری)
+              rm "$RAR_FILE"
+            else
+               echo "⚠️ RAR file $BASENAME was empty or extraction failed. Skipping conversion."
+            fi
+          done
+
+
+      # --- بخش 2: پردازش دانلودهای URL (همان منطق قبلی) ---
+      - name: Download and Process URLs
+        if: github.event_name == 'workflow_dispatch' # این بخش فقط زمانی اجرا می‌شود که دستی فراخوانی شود
         run: |
-          echo "🌐 Starting Download Process"
-          echo ""
+          echo "🌐 Starting URL Download Process"
           mkdir -p downloads tmp_downloads
           
           MODE="${{ github.event.inputs.mode }}"
@@ -56,35 +93,25 @@ jobs:
           done
 
           # 2. پردازش فایل‌های دانلود شده (استخراج RAR و کپی نهایی)
-          echo "⚙️ Starting file processing..."
-          
+          echo "⚙️ Starting file processing from downloads..."
           for FILE in tmp_downloads/*; do
             [ -f "$FILE" ] || continue
             BASENAME=$(basename "$FILE")
-            TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
-            mkdir -p "$TEMP_OUTPUT_DIR"
 
             if [[ "$BASENAME" == *.rar ]]; then
               echo "📦 Found RAR file: $BASENAME. Extracting..."
-              # استخراج فایل RAR به یک پوشه موقت جدید
+              TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
+              mkdir -p "$TEMP_OUTPUT_DIR"
               unrar x "$FILE" "$TEMP_OUTPUT_DIR/"
-              
-              # انتقال محتویات استخراج شده به پوشه اصلی (downloads/)
               if [ -d "$TEMP_OUTPUT_DIR" ] && [ "$(ls -A $TEMP_OUTPUT_DIR)" ]; then
-                echo "✅ Successfully extracted. Moving contents to downloads/"
                 mv "$TEMP_OUTPUT_DIR"/* downloads/ 2>/dev/null || true
-              else
-                 echo "⚠️ RAR file $BASENAME was empty or extraction failed. Copying original."
-                 cp "$FILE" "downloads/$BASENAME" # در صورت شکست، فایل اصلی را کپی کن
               fi
 
             elif [[ "$BASENAME" == *.zip ]]; then
-               # اگر فایل از قبل zip بود، آن را استخراج می‌کنیم
                echo "📦 Found ZIP file: $BASENAME. Extracting..."
                unzip -q "$FILE" -d downloads/
             else
               # حالت عادی: کپی مستقیم فایل‌ها
-              echo "➡️ Copying standard file: $BASENAME to downloads/"
               cp "$FILE" "downloads/$BASENAME"
             fi
           done
@@ -93,12 +120,12 @@ jobs:
           if [ "$MODE" = "zip" ]; then
             ARCHIVE_NAME="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
             echo "📦 Creating final zip archive: $ARCHIVE_NAME"
-            # اطمینان از اینکه فقط فایل‌های نهایی در پوشه downloads هستند
             zip -r "$ARCHIVE_NAME" downloads/
-            rm -rf tmp_downloads # پاکسازی موقت
+            rm -rf tmp_downloads 
           else
             echo "✅ Normal mode complete. Files are in the 'downloads/' directory."
           fi
+
 
       - name: Commit & Push files
         run: |
@@ -106,8 +133,8 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           echo "🏷️  Preparing to commit files"
-          # Collect all new/modified files under downloads/
-          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/)
+          # Collect all new/modified files under downloads/ AND extractor/
+          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/ extractor/)
           TOTAL=${#ALL_FILES[@]}
           echo "📦 Total files to push: $TOTAL"
           if [ "$TOTAL" -eq 0 ]; then
@@ -122,7 +149,6 @@ jobs:
             echo "🚀 Pushing batch $BATCH_NUM: files $((i+1))–$(( i + ${#BATCH[@]} )) of $TOTAL"
             git add "${BATCH[@]}"
             git commit -m "[Downloaded Files] Add downloaded files — batch $BATCH_NUM [skip ci]"
-            # Pull with rebase before each push to avoid conflicts
             git pull --rebase origin "$BRANCH"
             git push origin HEAD:"$BRANCH"
             echo "✅ Batch $BATCH_NUM pushed"
