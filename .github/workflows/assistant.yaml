@@ -1,4 +1,4 @@
-name: File Processor (RAR to ZIP Converter)
+name: File Processor (RAR to ZIP Converter & Downloader)
 on:
   push:
     branches:
@@ -22,12 +22,10 @@ on:
         required: false
         default: 90
         type: number
-
 jobs:
   process-files:
     runs-on: ubuntu-latest
     env:
-      # *** این خط برای رفع اخطار Node.js است ***
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
     permissions:
       contents: write
@@ -59,10 +57,11 @@ jobs:
               echo "✅ Successfully extracted. Creating ZIP archive..."
               # 2. تبدیل محتویات استخراج شده به یک فایل ZIP در پوشه downloads
               ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
-              zip -r "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
+              # استفاده از -r برای شامل کردن زیرپوشه‌ها و -o برای بازنویسی اجباری
+              zip -r -o "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
               echo "✅ Conversion complete: $ZIP_ARCHIVE created."
 
-              # 3. پاکسازی و انتقال فایل اصلی RAR (اختیاری)
+              # 3. پاکسازی فایل اصلی RAR (اختیاری)
               rm "$RAR_FILE"
             else
                echo "⚠️ RAR file $BASENAME was empty or extraction failed. Skipping conversion."
@@ -92,26 +91,32 @@ jobs:
               "$URL"
           done
 
-          # 2. پردازش فایل‌های دانلود شده (استخراج RAR و کپی نهایی)
+          # 2. پردازش فایل‌های دانلود شده (فقط RAR تبدیل می‌شود، ZIP کپی می‌شود)
           echo "⚙️ Starting file processing from downloads..."
           for FILE in tmp_downloads/*; do
             [ -f "$FILE" ] || continue
             BASENAME=$(basename "$FILE")
 
             if [[ "$BASENAME" == *.rar ]]; then
-              echo "📦 Found RAR file: $BASENAME. Extracting..."
+              echo "📦 Found RAR file: $BASENAME. Extracting and converting to ZIP..."
               TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
               mkdir -p "$TEMP_OUTPUT_DIR"
               unrar x "$FILE" "$TEMP_OUTPUT_DIR/"
               if [ -d "$TEMP_OUTPUT_DIR" ] && [ "$(ls -A $TEMP_OUTPUT_DIR)" ]; then
-                mv "$TEMP_OUTPUT_DIR"/* downloads/ 2>/dev/null || true
+                # تبدیل محتویات استخراج شده به ZIP
+                ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
+                zip -r -o "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
+                echo "✅ Conversion complete: $ZIP_ARCHIVE created."
               fi
 
             elif [[ "$BASENAME" == *.zip ]]; then
-               echo "📦 Found ZIP file: $BASENAME. Extracting..."
-               unzip -q "$FILE" -d downloads/
+               # اگر فایل از قبل ZIP بود، فقط آن را کپی می‌کنیم (استخراج نمی‌کنیم)
+               echo "➡️ Found existing ZIP file: $BASENAME. Copying directly to downloads/."
+               cp "$FILE" "downloads/$BASENAME"
+
             else
               # حالت عادی: کپی مستقیم فایل‌ها
+              echo "➡️ Copying standard file: $BASENAME to downloads/"
               cp "$FILE" "downloads/$BASENAME"
             fi
           done
@@ -120,6 +125,7 @@ jobs:
           if [ "$MODE" = "zip" ]; then
             ARCHIVE_NAME="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
             echo "📦 Creating final zip archive: $ARCHIVE_NAME"
+            # اطمینان از اینکه فقط فایل‌های نهایی در پوشه downloads هستند
             zip -r "$ARCHIVE_NAME" downloads/
             rm -rf tmp_downloads 
           else
