@@ -1,8 +1,5 @@
-name: File Processor (Download, Chunk & Save)
+name: URL Downloader and Processor
 on:
-  push:
-    branches:
-      - main 
   workflow_dispatch:
     inputs:
       urls:
@@ -18,149 +15,112 @@ on:
           - normal
           - zip
       split_threshold_mb:
-        description: 'Maximum size for a single chunk in MB (Must be < 100MB). Set to 50 for safety.'
+        description: 'Split files larger than this MB (0 = never split). Max recommended < 100MB.'
         required: false
-        default: 90 # تنظیم پیش‌فرض روی ۵۰ مگابایت برای اطمینان از زیر ۱۰۰ مگابایت
+        default: 90
         type: number
 jobs:
-  process-files:
+  save-file:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install dependencies (aria2, zip, unrar)
+      - name: Install aria2, zip, and unrar
         run: |
           sudo apt-get update
+          # نصب ابزارهای مورد نیاز شامل unrar برای استخراج RAR
           sudo apt-get install -y aria2 zip unzip unrar
-
-      # --- بخش 1: پردازش فایل‌های آپلود شده (RAR -> ZIP و سپس Chunking) ---
-      - name: Process Uploaded RAR Files
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[Uploaded]') # شرطی برای اجرای منطق تبدیل فقط در صورت Push و وجود تگ خاص
+      - name: Downloader Execution
         run: |
-          echo "🔍 Checking for uploaded RAR files in the extractor directory..."
-          EXTRACTOR_DIR="extractor"
-          mkdir -p downloads
-
-          find "$EXTRACTOR_DIR" -type f -name "*.rar" | while read RAR_FILE; do
-            BASENAME=$(basename "$RAR_FILE")
-            echo "📦 Found RAR file: $BASENAME. Extracting and converting to ZIP..."
-
-            TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
-            mkdir -p "$TEMP_OUTPUT_DIR"
-            unrar x "$RAR_FILE" "$TEMP_OUTPUT_DIR/"
-            
-            if [ -d "$TEMP_OUTPUT_DIR" ] && [ "$(ls -A $TEMP_OUTPUT_DIR)" ]; then
-              echo "✅ Successfully extracted. Creating ZIP archive..."
-              ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
-              # ایجاد فایل ZIP از محتویات استخراج شده
-              zip -r -o "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
-              echo "✅ Conversion complete: $ZIP_ARCHIVE created."
-
-              # --- اعمال Chunking روی فایل تبدیل شده ---
-              CHUNK_THRESHOLD_MB=${{ github.event.inputs.split_threshold_mb }} # استفاده از ورودی Workflow برای تعیین اندازه chunk
-              if [ "$CHUNK_THRESHOLD_MB" -gt 0 ]; then
-                echo "✂️ Splitting $ZIP_ARCHIVE into chunks of ${CHUNK_THRESHOLD_MB}MB..."
-                # تقسیم فایل ZIP به بخش‌های کوچکتر (با پسوند .partX.zip)
-                split -b "${CHUNK_THRESHOLD_MB}m" "$ZIP_ARCHIVE" "downloads/chunk_"
-              else
-                echo "➡️ No splitting requested for uploaded file."
-                cp "$ZIP_ARCHIVE" "downloads/$BASENAME.zip" # کپی مستقیم اگر تقسیم‌بندی غیرفعال باشد
-              fi
-            else
-               echo "⚠️ RAR file $BASENAME was empty or extraction failed. Skipping conversion."
-            fi
-          done
-
-
-      # --- بخش 2: پردازش دانلودهای URL (منطق اصلی) ---
-      - name: Download and Process URLs
-        if: github.event_name == 'workflow_dispatch' # این بخش فقط زمانی اجرا می‌شود که دستی فراخوانی شود
-        run: |
-          echo "🌐 Starting URL Download Process"
           MODE="${{ github.event.inputs.mode }}"
           URLS="${{ github.event.inputs.urls }}"
-          SPLIT_THRESHOLD_MB=${{ github.event.inputs.split_threshold_mb }}
+          SPLIT_THRESHOLD_MB="${{ github.event.inputs.split_threshold_mb }}"
           SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
-
+          echo "🌐 Starting Download Process with mode: $MODE"
+          echo "Split threshold: $SPLIT_THRESHOLD_MB MB"
           mkdir -p downloads tmp_downloads
-          
-          # 1. دانلود هر URL به پوشه موقت
+
+          # --- مرحله ۱: دانلود فایل‌ها ---
           for URL in $URLS; do
             FILENAME=$(basename "$URL")
             echo "⬇️ Downloading $URL -> $FILENAME"
             aria2c \
               --split=2 \
               --max-connection-per-server=2 \
+              --min-split-size=90M \
               --dir="tmp_downloads" \
               --out="$FILENAME" \
               "$URL"
           done
 
-          # 2. پردازش فایل‌های دانلود شده (RAR تبدیل می‌شود، ZIP کپی می‌شود)
-          echo "⚙️ Starting file processing from downloads..."
-          for FILE in tmp_downloads/*; do
-            [ -f "$FILE" ] || continue
-            BASENAME=$(basename "$FILE")
-
-            if [[ "$BASENAME" == *.rar ]]; then
-              # --- منطق RAR: استخراج و تبدیل به ZIP ---
-              echo "📦 Found RAR file: $BASENAME. Extracting and converting to ZIP..."
-              TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
-              mkdir -p "$TEMP_OUTPUT_DIR"
-              unrar x "$FILE" "$TEMP_OUTPUT_DIR/"
-              if [ -d "$TEMP_OUTPUT_DIR" ] && [ "$(ls -A $TEMP_OUTPUT_DIR)" ]; then
-                # تبدیل محتویات استخراج شده به ZIP
-                ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
-                zip -r -o "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
-                echo "✅ Conversion complete: $ZIP_ARCHIVE created."
-
-                # --- اعمال Chunking روی فایل تبدیل شده (اگر نیاز باشد) ---
-                if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ]; then
-                    echo "✂️ Splitting $ZIP_ARCHIVE into chunks of ${SPLIT_THRESHOLD_MB}MB..."
-                    split -b "${SPLIT_THRESHOLD_MB}m" "$ZIP_ARCHIVE" "downloads/chunk_"
-                else
-                    cp "$ZIP_ARCHIVE" "downloads/$BASENAME.zip" # کپی مستقیم اگر تقسیم‌بندی غیرفعال باشد
-                fi
-
-              fi
-
-            elif [[ "$BASENAME" == *.zip ]]; then
-               # --- منطق ZIP: فقط کپی مستقیم (بدون استخراج) ---
-               echo "➡️ Found existing ZIP file: $BASENAME. Copying directly to downloads/."
-               cp "$FILE" "downloads/$BASENAME"
-
-            else
-              # حالت عادی: کپی مستقیم فایل‌ها
-              echo "➡️ Copying standard file: $BASENAME to downloads/"
-              cp "$FILE" "downloads/$BASENAME"
-            fi
-          done
-
-          # 3. مدیریت خروجی نهایی بر اساس MODE (اگر mode=zip باشد، همه چیز را در یک آرشیو می‌ریزیم)
+          # --- مرحله ۲: پردازش فایل‌ها (استخراج RAR و سپس Chunking) ---
           if [ "$MODE" = "zip" ]; then
             ARCHIVE_NAME="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
-            echo "📦 Creating final zip archive: $ARCHIVE_NAME"
-            # توجه: اگر فایل‌ها تقسیم شده باشند، این آرشیو شامل بخش‌های کوچک خواهد بود.
-            zip -r "$ARCHIVE_NAME" downloads/
-            rm -rf tmp_downloads 
+            echo "📦 Creating zip archive: $ARCHIVE_NAME"
+            # در حالت ZIP، همه چیز را به یک آرشیو می‌ریزیم (تقسیم‌بندی روی این آرشیو نهایی اعمال می‌شود)
+            zip -j "$ARCHIVE_NAME" tmp_downloads/*
+            rm -rf tmp_downloads
           else
-            echo "✅ Normal mode complete. Files are in the 'downloads/' directory."
+            echo "⚙️ Normal mode: Processing files for extraction and splitting..."
+            for FILE in tmp_downloads/*; do
+              [ -f "$FILE" ] || continue
+              BASENAME=$(basename "$FILE")
+
+              if [[ "$BASENAME" == *.rar ]]; then
+                # --- قابلیت جدید: استخراج RAR ---
+                echo "📦 Found RAR file: $BASENAME. Extracting..."
+                TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
+                mkdir -p "$TEMP_OUTPUT_DIR"
+                unrar x "$FILE" "$TEMP_OUTPUT_DIR/"
+
+                # پردازش محتویات استخراج شده (که حالا در TEMP_OUTPUT_DIR هستند)
+                for EXTRACTED_FILE in "$TEMP_OUTPUT_DIR"/*; do
+                    [ -f "$EXTRACTED_FILE" ] || continue
+                    SIZE=$(stat -c%s "$EXTRACTED_FILE")
+                    EXT_BASENAME=$(basename "$EXTRACTED_FILE")
+
+                    if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
+                        echo "✂️ $EXT_BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts (zip-split)"
+                        # تقسیم فایل استخراج شده به بخش‌های کوچک‌تر
+                        zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${EXT_BASENAME}.zip" -j "$EXTRACTED_FILE"
+                    else
+                        cp "$EXTRACTED_FILE" "downloads/$EXT_BASENAME" # کپی مستقیم اگر کوچک باشد
+                    fi
+                done
+                rm -rf "$TEMP_OUTPUT_DIR"
+
+              elif [[ "$BASENAME" == *.zip ]]; then
+                 # --- قابلیت جدید: ZIP دانلود شده فقط کپی می‌شود (بدون استخراج) ---
+                 echo "➡️ Found existing ZIP file: $BASENAME. Copying directly to downloads/."
+                 cp "$FILE" "downloads/$BASENAME"
+
+              else
+                # حالت عادی: فایل معمولی
+                SIZE=$(stat -c%s "$FILE")
+                if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
+                  echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts (zip-split)"
+                  # تقسیم فایل دانلود شده به بخش‌های کوچک‌تر
+                  zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${BASENAME}.zip" -j "$FILE"
+                else
+                  cp "$FILE" "downloads/$BASENAME" # کپی مستقیم اگر کوچک باشد
+                fi
+              fi
+            done
+            rm -rf tmp_downloads
           fi
 
-
-      - name: Commit & Push files (Chunked)
+      - name: Commit & Push in batches of 5 files
         run: |
           BRANCH="${GITHUB_REF_NAME}"
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           echo "🏷️  Preparing to commit files"
-          # Collect all new/modified files under downloads/ AND extractor/
-          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/ extractor/)
+          # Collect all new/modified files under downloads/
+          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/)
           TOTAL=${#ALL_FILES[@]}
           echo "📦 Total files to push: $TOTAL"
           if [ "$TOTAL" -eq 0 ]; then
@@ -175,6 +135,7 @@ jobs:
             echo "🚀 Pushing batch $BATCH_NUM: files $((i+1))–$(( i + ${#BATCH[@]} )) of $TOTAL"
             git add "${BATCH[@]}"
             git commit -m "[Downloaded Files] Add downloaded files — batch $BATCH_NUM [skip ci]"
+            # Pull with rebase before each push to avoid conflicts
             git pull --rebase origin "$BRANCH"
             git push origin HEAD:"$BRANCH"
             echo "✅ Batch $BATCH_NUM pushed"
