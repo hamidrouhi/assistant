@@ -1,8 +1,8 @@
-name: File Processor (RAR to ZIP Converter & Downloader)
+name: File Processor (Download, Chunk & Save)
 on:
   push:
     branches:
-      - main # یا هر شاخه‌ای که می‌خواهید روی آن اجرا شود
+      - main 
   workflow_dispatch:
     inputs:
       urls:
@@ -18,15 +18,13 @@ on:
           - normal
           - zip
       split_threshold_mb:
-        description: 'Split files larger than this MB (Note: Splitting is disabled in this version)'
+        description: 'Maximum size for a single chunk in MB (Must be < 100MB). Set to 50 for safety.'
         required: false
-        default: 90
+        default: 90 # تنظیم پیش‌فرض روی ۵۰ مگابایت برای اطمینان از زیر ۱۰۰ مگابایت
         type: number
 jobs:
   process-files:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
     permissions:
       contents: write
     steps:
@@ -35,7 +33,12 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- بخش 1: پردازش فایل‌های آپلود شده (RAR -> ZIP) ---
+      - name: Install dependencies (aria2, zip, unrar)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 zip unzip unrar
+
+      # --- بخش 1: پردازش فایل‌های آپلود شده (RAR -> ZIP و سپس Chunking) ---
       - name: Process Uploaded RAR Files
         if: github.event_name == 'push' && contains(github.event.head_commit.message, '[Uploaded]') # شرطی برای اجرای منطق تبدیل فقط در صورت Push و وجود تگ خاص
         run: |
@@ -43,40 +46,48 @@ jobs:
           EXTRACTOR_DIR="extractor"
           mkdir -p downloads
 
-          # پیدا کردن تمام فایل‌های .rar در پوشه extractor
           find "$EXTRACTOR_DIR" -type f -name "*.rar" | while read RAR_FILE; do
             BASENAME=$(basename "$RAR_FILE")
             echo "📦 Found RAR file: $BASENAME. Extracting and converting to ZIP..."
 
-            # 1. استخراج فایل RAR به یک پوشه موقت
             TEMP_OUTPUT_DIR="tmp_processed_${BASENAME}"
             mkdir -p "$TEMP_OUTPUT_DIR"
             unrar x "$RAR_FILE" "$TEMP_OUTPUT_DIR/"
             
             if [ -d "$TEMP_OUTPUT_DIR" ] && [ "$(ls -A $TEMP_OUTPUT_DIR)" ]; then
               echo "✅ Successfully extracted. Creating ZIP archive..."
-              # 2. تبدیل محتویات استخراج شده به یک فایل ZIP در پوشه downloads
               ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
+              # ایجاد فایل ZIP از محتویات استخراج شده
               zip -r -o "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
               echo "✅ Conversion complete: $ZIP_ARCHIVE created."
 
-              # 3. پاکسازی فایل اصلی RAR (اختیاری)
-              rm "$RAR_FILE"
+              # --- اعمال Chunking روی فایل تبدیل شده ---
+              CHUNK_THRESHOLD_MB=${{ github.event.inputs.split_threshold_mb }} # استفاده از ورودی Workflow برای تعیین اندازه chunk
+              if [ "$CHUNK_THRESHOLD_MB" -gt 0 ]; then
+                echo "✂️ Splitting $ZIP_ARCHIVE into chunks of ${CHUNK_THRESHOLD_MB}MB..."
+                # تقسیم فایل ZIP به بخش‌های کوچکتر (با پسوند .partX.zip)
+                split -b "${CHUNK_THRESHOLD_MB}m" "$ZIP_ARCHIVE" "downloads/chunk_"
+              else
+                echo "➡️ No splitting requested for uploaded file."
+                cp "$ZIP_ARCHIVE" "downloads/$BASENAME.zip" # کپی مستقیم اگر تقسیم‌بندی غیرفعال باشد
+              fi
             else
                echo "⚠️ RAR file $BASENAME was empty or extraction failed. Skipping conversion."
             fi
           done
 
 
-      # --- بخش 2: پردازش دانلودهای URL (فقط RAR تبدیل می‌شود، ZIP کپی می‌شود) ---
+      # --- بخش 2: پردازش دانلودهای URL (منطق اصلی) ---
       - name: Download and Process URLs
         if: github.event_name == 'workflow_dispatch' # این بخش فقط زمانی اجرا می‌شود که دستی فراخوانی شود
         run: |
           echo "🌐 Starting URL Download Process"
-          mkdir -p downloads tmp_downloads
-          
           MODE="${{ github.event.inputs.mode }}"
           URLS="${{ github.event.inputs.urls }}"
+          SPLIT_THRESHOLD_MB=${{ github.event.inputs.split_threshold_mb }}
+          SPLIT_THRESHOLD_BYTES=$(( SPLIT_THRESHOLD_MB * 1024 * 1024 ))
+
+          mkdir -p downloads tmp_downloads
           
           # 1. دانلود هر URL به پوشه موقت
           for URL in $URLS; do
@@ -90,7 +101,7 @@ jobs:
               "$URL"
           done
 
-          # 2. پردازش فایل‌های دانلود شده (منطق جدید)
+          # 2. پردازش فایل‌های دانلود شده (RAR تبدیل می‌شود، ZIP کپی می‌شود)
           echo "⚙️ Starting file processing from downloads..."
           for FILE in tmp_downloads/*; do
             [ -f "$FILE" ] || continue
@@ -107,6 +118,15 @@ jobs:
                 ZIP_ARCHIVE="downloads/${BASENAME%.rar}.zip"
                 zip -r -o "$ZIP_ARCHIVE" "$TEMP_OUTPUT_DIR"/*
                 echo "✅ Conversion complete: $ZIP_ARCHIVE created."
+
+                # --- اعمال Chunking روی فایل تبدیل شده (اگر نیاز باشد) ---
+                if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ]; then
+                    echo "✂️ Splitting $ZIP_ARCHIVE into chunks of ${SPLIT_THRESHOLD_MB}MB..."
+                    split -b "${SPLIT_THRESHOLD_MB}m" "$ZIP_ARCHIVE" "downloads/chunk_"
+                else
+                    cp "$ZIP_ARCHIVE" "downloads/$BASENAME.zip" # کپی مستقیم اگر تقسیم‌بندی غیرفعال باشد
+                fi
+
               fi
 
             elif [[ "$BASENAME" == *.zip ]]; then
@@ -121,11 +141,11 @@ jobs:
             fi
           done
 
-          # 3. مدیریت خروجی نهایی بر اساس MODE
+          # 3. مدیریت خروجی نهایی بر اساس MODE (اگر mode=zip باشد، همه چیز را در یک آرشیو می‌ریزیم)
           if [ "$MODE" = "zip" ]; then
             ARCHIVE_NAME="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
             echo "📦 Creating final zip archive: $ARCHIVE_NAME"
-            # اطمینان از اینکه فقط فایل‌های نهایی در پوشه downloads هستند
+            # توجه: اگر فایل‌ها تقسیم شده باشند، این آرشیو شامل بخش‌های کوچک خواهد بود.
             zip -r "$ARCHIVE_NAME" downloads/
             rm -rf tmp_downloads 
           else
@@ -133,19 +153,12 @@ jobs:
           fi
 
 
-# ... (بخش های قبلی مانند Checkout, Install dependencies و Download and Process URLs بدون تغییر باقی میمانند)
-
-      - name: Commit & Push files using Git LFS
+      - name: Commit & Push files (Chunked)
         run: |
           BRANCH="${GITHUB_REF_NAME}"
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          echo "🏷️  Preparing to commit files with LFS support"
-          
-          # اطمینان از نصب Git LFS (اگر قبلاً در مرحله نصب ابزارها انجام نشده باشد)
-          sudo apt-get install -y git-lfs
-          git lfs install
-
+          echo "🏷️  Preparing to commit files"
           # Collect all new/modified files under downloads/ AND extractor/
           mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/ extractor/)
           TOTAL=${#ALL_FILES[@]}
@@ -160,56 +173,10 @@ jobs:
             BATCH_NUM=$(( BATCH_NUM + 1 ))
             BATCH=("${ALL_FILES[@]:i:BATCH_SIZE}")
             echo "🚀 Pushing batch $BATCH_NUM: files $((i+1))–$(( i + ${#BATCH[@]} )) of $TOTAL"
-            
             git add "${BATCH[@]}"
             git commit -m "[Downloaded Files] Add downloaded files — batch $BATCH_NUM [skip ci]"
-            
-            # Pull with rebase before each push to avoid conflicts
             git pull --rebase origin "$BRANCH"
-            
-            # *** تغییر کلیدی: استفاده از git lfs push برای فایل‌های بزرگ ***
-            git push origin HEAD:"$BRANCH" 
-            
+            git push origin HEAD:"$BRANCH"
             echo "✅ Batch $BATCH_NUM pushed"
           done
           echo "🎉 All $TOTAL files pushed in $BATCH_NUM batch(es)"
-
-      - name: Commit & Push files using Git LFS
-        run: |
-          BRANCH="${GITHUB_REF_NAME}"
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          echo "🏷️  Preparing to commit files with LFS support"
-          
-          # اطمینان از نصب Git LFS (اگر قبلاً در مرحله نصب ابزارها انجام نشده باشد)
-          sudo apt-get install -y git-lfs
-          git lfs install
-
-          # Collect all new/modified files under downloads/ AND extractor/
-          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/ extractor/)
-          TOTAL=${#ALL_FILES[@]}
-          echo "📦 Total files to push: $TOTAL"
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "Nothing to commit"
-            exit 0
-          fi
-          BATCH_SIZE=5
-          BATCH_NUM=0
-          for (( i=0; i<TOTAL; i+=BATCH_SIZE )); do
-            BATCH_NUM=$(( BATCH_NUM + 1 ))
-            BATCH=("${ALL_FILES[@]:i:BATCH_SIZE}")
-            echo "🚀 Pushing batch $BATCH_NUM: files $((i+1))–$(( i + ${#BATCH[@]} )) of $TOTAL"
-            
-            git add "${BATCH[@]}"
-            git commit -m "[Downloaded Files] Add downloaded files — batch $BATCH_NUM [skip ci]"
-            
-            # Pull with rebase before each push to avoid conflicts
-            git pull --rebase origin "$BRANCH"
-            
-            # *** تغییر کلیدی: استفاده از git lfs push برای فایل‌های بزرگ ***
-            git push origin HEAD:"$BRANCH" 
-            
-            echo "✅ Batch $BATCH_NUM pushed"
-          done
-          echo "🎉 All $TOTAL files pushed in $BATCH_NUM batch(es)"
-
