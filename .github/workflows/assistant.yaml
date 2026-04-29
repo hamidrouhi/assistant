@@ -32,7 +32,7 @@ jobs:
       - name: Install aria2, zip, and unrar
         run: |
           sudo apt-get update
-          # نصب ابزارهای مورد نیاز شامل unrar برای استخراج RAR
+          # نصب ابزارهای مورد نیاز شامل aria2، zip و unrar برای استخراج RAR
           sudo apt-get install -y aria2 zip unzip unrar
 
       - name: Downloader Execution
@@ -52,17 +52,15 @@ jobs:
             aria2c \
               --split=2 \
               --max-connection-per-server=2 \
-              --min-split-size=90M \
               --dir="tmp_downloads" \
               --out="$FILENAME" \
               "$URL"
           done
 
-          # --- مرحله ۲: پردازش فایل‌ها (استخراج RAR و سپس Chunking) ---
+          # --- مرحله ۲: پردازش فایل‌ها (استخراج RAR و تبدیل به ZIP) ---
           if [ "$MODE" = "zip" ]; then
             ARCHIVE_NAME="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
             echo "📦 Creating zip archive: $ARCHIVE_NAME"
-            # در حالت ZIP، همه چیز را به یک آرشیو می‌ریزیم (این آرشیو نهایی برای Chunking آماده است)
             zip -j "$ARCHIVE_NAME" tmp_downloads/*
             rm -rf tmp_downloads
           else
@@ -108,13 +106,12 @@ jobs:
 
               if [ "$SPLIT_THRESHOLD_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
                 echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting into ${SPLIT_THRESHOLD_MB}MB parts (zip-split)"
-                # Create a zip split into parts that can be reassembled with `zip -F`
-                zip -0 -s "${SPLIT_THRESHOLD_MB}m" "downloads/${BASENAME}.zip" -j "$FILE"
-                echo "✅ Parts: $(ls downloads/${BASENAME}.z* 2>/dev/null | wc -l)"
+                # تقسیم فایل به بخش‌های کوچک‌تر با پسوند .partX.zip
+                split -b "${SPLIT_THRESHOLD_MB}m" "$FILE" "downloads/chunk_"
               else
-                cp "$FILE" "downloads/$BASENAME"
+                echo "✅ $BASENAME is within size limit or threshold is 0. Keeping as single file."
               fi
-            done
+          done
 
 
       - name: Commit & Push in batches of 5 files
