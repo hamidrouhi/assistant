@@ -2,12 +2,14 @@
 
 ----
 
-- 1 - 🎶 [I-Ran-ALL-4-Gemma4-Models-on-Apple-Silicon-—-The-Results-Surprised-Me-(Mac⧸Macbook⧸Mac-Mini)](https://github.com/hamidrouhi/assistant/tree/main/videos/I-Ran-ALL-4-Gemma4-Models-on-Apple-Silicon-%E2%80%94-The-Results-Surprised-Me-%28Mac%E2%A7%B8Macbook%E2%A7%B8Mac-Mini%29)
-- 2 - 📽️ [I-Ran-a-Trillion-Parameter-AI-on-a-Mac...-Here’s-the-Secret](https://github.com/hamidrouhi/assistant/tree/main/videos/I-Ran-a-Trillion-Parameter-AI-on-a-Mac...-Here%E2%80%99s-the-Secret)
-- 3 - 📺 [Local-AI-on-Mac-Mini-M4：-Testing-Ministral-3B,-8B-&-14B](https://github.com/hamidrouhi/assistant/tree/main/videos/Local-AI-on-Mac-Mini-M4%EF%BC%9A-Testing-Ministral-3B%2C-8B-%26-14B)
-- 4 - 🎭 [Mac-Mini-M4-+-OpenClaw-Is-Dangerous](https://github.com/hamidrouhi/assistant/tree/main/videos/Mac-Mini-M4-%2B-OpenClaw-Is-Dangerous)
-- 5 - 🎞️ [Mac-Studio-vs.-Nvidia：-Running-Large-Models-Locally!](https://github.com/hamidrouhi/assistant/tree/main/videos/Mac-Studio-vs.-Nvidia%EF%BC%9A-Running-Large-Models-Locally%21)
-- 6 - 🎸 [The-M4-Mac-Mini-Homelab-It-Runs-Local-AI,-Plex⧸Jellyfin,-and-a-NAS](https://github.com/hamidrouhi/assistant/tree/main/videos/The-M4-Mac-Mini-Homelab-It-Runs-Local-AI%2C-Plex%E2%A7%B8Jellyfin%2C-and-a-NAS)
-- 7 - 🎬 [Training-AI-models-on-the-Mac-mini-M4](https://github.com/hamidrouhi/assistant/tree/main/videos/Training-AI-models-on-the-Mac-mini-M4)
-- 8 - 📽️ [Training-AI-models-on-the-Mac-mini-M4_gamma_1370](https://github.com/hamidrouhi/assistant/tree/main/videos/Training-AI-models-on-the-Mac-mini-M4_gamma_1370)
-- 9 - 🎯 [Who-needs-3-Mac-Minis...？](https://github.com/hamidrouhi/assistant/tree/main/videos/Who-needs-3-Mac-Minis...%EF%BC%9F)
+- 1 - 🎹 [Apple-JUST-Dropped-a-Game-Changer](https://github.com/hamidrouhi/assistant/tree/main/videos/Apple-JUST-Dropped-a-Game-Changer)
+- 2 - 🎬 [I-Ran-ALL-4-Gemma4-Models-on-Apple-Silicon-—-The-Results-Surprised-Me-(Mac⧸Macbook⧸Mac-Mini)](https://github.com/hamidrouhi/assistant/tree/main/videos/I-Ran-ALL-4-Gemma4-Models-on-Apple-Silicon-%E2%80%94-The-Results-Surprised-Me-%28Mac%E2%A7%B8Macbook%E2%A7%B8Mac-Mini%29)
+- 3 - 🎪 [I-Ran-a-Trillion-Parameter-AI-on-a-Mac...-Here’s-the-Secret](https://github.com/hamidrouhi/assistant/tree/main/videos/I-Ran-a-Trillion-Parameter-AI-on-a-Mac...-Here%E2%80%99s-the-Secret)
+- 4 - 🎶 [LLM-testing-M4-Mac-Mini-CLUSTER](https://github.com/hamidrouhi/assistant/tree/main/videos/LLM-testing-M4-Mac-Mini-CLUSTER)
+- 5 - 🎯 [Local-AI-on-Mac-Mini-M4：-Testing-Ministral-3B,-8B-&-14B](https://github.com/hamidrouhi/assistant/tree/main/videos/Local-AI-on-Mac-Mini-M4%EF%BC%9A-Testing-Ministral-3B%2C-8B-%26-14B)
+- 6 - 🎯 [Mac-Mini-M4-+-OpenClaw-Is-Dangerous](https://github.com/hamidrouhi/assistant/tree/main/videos/Mac-Mini-M4-%2B-OpenClaw-Is-Dangerous)
+- 7 - 🎪 [Mac-Studio-vs.-Nvidia：-Running-Large-Models-Locally!](https://github.com/hamidrouhi/assistant/tree/main/videos/Mac-Studio-vs.-Nvidia%EF%BC%9A-Running-Large-Models-Locally%21)
+- 8 - 🎸 [The-M4-Mac-Mini-Homelab-It-Runs-Local-AI,-Plex⧸Jellyfin,-and-a-NAS](https://github.com/hamidrouhi/assistant/tree/main/videos/The-M4-Mac-Mini-Homelab-It-Runs-Local-AI%2C-Plex%E2%A7%B8Jellyfin%2C-and-a-NAS)
+- 9 - 🎞️ [Training-AI-models-on-the-Mac-mini-M4](https://github.com/hamidrouhi/assistant/tree/main/videos/Training-AI-models-on-the-Mac-mini-M4)
+- 10 - 🎸 [Training-AI-models-on-the-Mac-mini-M4_gamma_1370](https://github.com/hamidrouhi/assistant/tree/main/videos/Training-AI-models-on-the-Mac-mini-M4_gamma_1370)
+- 11 - 🎹 [Who-needs-3-Mac-Minis...？](https://github.com/hamidrouhi/assistant/tree/main/videos/Who-needs-3-Mac-Minis...%EF%BC%9F)
